@@ -44,7 +44,8 @@
   th{font-size:11px; font-weight:400; color:var(--text3); padding:2px 6px; min-width:56px; text-align:center;}
   th.now{color:var(--info-tx); font-weight:600;}
   td{padding:3px; text-align:center;}
-  .pname{text-align:left; padding:4px 8px 4px 0; white-space:nowrap; font-size:13px;}
+  .pname{text-align:left; padding:4px 8px 4px 0; white-space:nowrap; font-size:13px; width:var(--namew,140px); min-width:var(--namew,140px); max-width:var(--namew,140px); overflow:hidden; text-overflow:ellipsis;}
+  .pname-edit{width:auto; min-width:auto; max-width:none;}
   .cnt{color:var(--text3);}
   .chk{display:inline-flex; align-items:center; justify-content:center; min-width:56px; height:26px; padding:0 6px; border-radius:6px; cursor:pointer; border:0.5px solid var(--border2); user-select:none; font-size:12px; white-space:nowrap;}
   .chk.on{background:var(--success-bg); color:var(--success-tx);}
@@ -151,16 +152,25 @@ async function autoFillMonths(){
   const newRows=[];
   services.forEach(svc=>{
     const svcRows=rows.filter(r=>r.sluzba===svc);
-    const existing=new Set(svcRows.map(r=>r.mesiac));
-    const lastMonth=[...new Set(svcRows.map(r=>r.mesiac))].sort().pop();
-    const template=svcRows.filter(r=>r.mesiac===lastMonth);
+    const existingMonths=new Set(svcRows.map(r=>r.mesiac));
+    // zoradené existujúce mesiace; budeme postupovať a vždy kopírovať z posledného známeho zloženia
+    let lastKnown=[...new Set(svcRows.map(r=>r.mesiac))].sort().pop();
+    let template=svcRows.filter(r=>r.mesiac===lastKnown);
     needed.forEach(dateStr=>{
-      if(!existing.has(dateStr)){
-        template.forEach(r=>{
-          newRows.push({sluzba:r.sluzba, platca:r.platca, mesiac:dateStr, suma:0, podiely:r.podiely,
-            typ:r.typ, cena_celkom:r.cena_celkom, cena_podiel:r.cena_podiel, zaplatene:false});
-        });
+      if(existingMonths.has(dateStr)){
+        // tento mesiac už existuje - aktualizuj template naň (zachytí, kto skončil/pribudol)
+        template=svcRows.filter(r=>r.mesiac===dateStr);
+        return;
       }
+      // doplň podľa aktuálneho template (kto bol naposledy aktívny)
+      template.forEach(r=>{
+        const nr={sluzba:r.sluzba, platca:r.platca, mesiac:dateStr, suma:0, podiely:r.podiely,
+          typ:r.typ, cena_celkom:r.cena_celkom, cena_podiel:r.cena_podiel, zaplatene:false, poradie:r.poradie};
+        newRows.push(nr);
+      });
+      // posuň template na práve vytvorený mesiac, aby sa ďalší kopíroval z neho
+      template=template.map(r=>({...r, mesiac:dateStr}));
+      existingMonths.add(dateStr);
     });
   });
   if(newRows.length>0){
@@ -188,10 +198,20 @@ function render(){
   const mk=monthKeys();
   document.getElementById("yearLabel").textContent = viewYear;
   const wrap=document.getElementById("services"); wrap.innerHTML="";
-  const services=[...new Set(rows.map(r=>r.sluzba))];
+  // poradie služby = najmenšie 'poradie' z jej riadkov
+  const svcOrder={};
+  rows.forEach(r=>{ const o=Number(r.poradie)||100; if(!(r.sluzba in svcOrder)||o<svcOrder[r.sluzba]) svcOrder[r.sluzba]=o; });
+  const services=[...new Set(rows.map(r=>r.sluzba))].sort((a,b)=>{
+    const d=(svcOrder[a]??100)-(svcOrder[b]??100); return d!==0?d:a.localeCompare(b,"sk");
+  });
+  // jednotná šírka stĺpca s menom podľa najdlhšieho mena naprieč všetkými službami
+  const allNames=[...new Set(rows.map(r=>r.platca))];
+  const maxLen=allNames.reduce((a,n)=>Math.max(a,n.length),4);
+  const nameW=(maxLen*8.5)+(editMode?70:16);
+  wrap.style.setProperty("--namew", Math.ceil(nameW)+"px");
   if(services.length===0 && !editMode){ wrap.innerHTML='<div class="loading">Žiadne platby v databáze.</div>'; }
 
-  services.forEach(svc=>{
+  services.forEach((svc,svcIdx)=>{
     const svcRows=rows.filter(r=>r.sluzba===svc);
     const people=[...new Set(svcRows.map(r=>r.platca))];
     const type=svcRows[0].typ || "fix";
@@ -220,6 +240,8 @@ function render(){
 
     const card=document.createElement("div"); card.className="card";
     let editControls = editMode ? `
+      <button class="editbtn" data-svcup="${svc}" ${svcIdx===0?'disabled':''}>▲</button>
+      <button class="editbtn" data-svcdown="${svc}" ${svcIdx===services.length-1?'disabled':''}>▼</button>
       <button class="editbtn" data-renamesvc="${svc}">Premenovať</button>
       <button class="editbtn" data-svctype="${svc}">Typ</button>
       <button class="editbtn danger" data-delsvc="${svc}">Zmazať službu</button>` : "";
@@ -233,9 +255,9 @@ function render(){
         return `<td><span class="chk ${on?'on':''}" data-id="${row.id}" title="${m.label}: ${eur(a)}">${on?eur(a):''}</span></td>`;
       }).join("");
       const pEdit = editMode ? `<button class="editbtn" data-renameper="${svc}|${p}">✎</button><button class="editbtn danger" data-delper="${svc}|${p}">✕</button>` : "";
-      return `<tr><td class="pname">${p} ${pEdit}</td>${cells}</tr>`;
+      return `<tr><td class="pname${editMode?' pname-edit':''}">${p} ${pEdit}</td>${cells}</tr>`;
     }).join("");
-    const header=`<tr><th></th>${mk.map(m=>`<th class="${m.isNow?'now':''}">${m.label}</th>`).join("")}</tr>`;
+    const header=`<tr><th style="width:var(--namew,140px);min-width:var(--namew,140px)"></th>${mk.map(m=>`<th class="${m.isNow?'now':''}">${m.label}</th>`).join("")}</tr>`;
 
     let editTools = "";
     if(editMode){
@@ -282,6 +304,8 @@ function bindEvents(){
   wrap.querySelectorAll("[data-renamesvc]").forEach(el=>el.addEventListener("click",()=>renameService(el.dataset.renamesvc)));
   wrap.querySelectorAll("[data-delsvc]").forEach(el=>el.addEventListener("click",()=>deleteService(el.dataset.delsvc)));
   wrap.querySelectorAll("[data-svctype]").forEach(el=>el.addEventListener("click",()=>changeType(el.dataset.svctype)));
+  wrap.querySelectorAll("[data-svcup]").forEach(el=>el.addEventListener("click",()=>moveService(el.dataset.svcup,-1)));
+  wrap.querySelectorAll("[data-svcdown]").forEach(el=>el.addEventListener("click",()=>moveService(el.dataset.svcdown,1)));
   wrap.querySelectorAll("[data-priceedit]").forEach(el=>el.addEventListener("click",e=>{e.preventDefault();const[s,t]=el.dataset.priceedit.split("|");changePrice(s,t);}));
   wrap.querySelectorAll("[data-renameper]").forEach(el=>el.addEventListener("click",()=>{const[s,p]=el.dataset.renameper.split("|");editPerson(s,p);}));
   wrap.querySelectorAll("[data-delper]").forEach(el=>el.addEventListener("click",()=>{const[s,p]=el.dataset.delper.split("|");deletePerson(s,p);}));
@@ -355,7 +379,7 @@ async function setPeriod(svc,p){
   const cenaCelkom=Number(svcRows[0].cena_celkom)||0;
   const cenaPodiel=Number(svcRows[0].cena_podiel)||0;
   const sh=pRows[0]?(pRows[0].podiely||1):1;
-  const toAdd=target.filter(m=>!existing.has(m)).map(m=>({sluzba:svc, platca:p, mesiac:m, suma:0, podiely:sh, typ:typ, cena_celkom:cenaCelkom, cena_podiel:cenaPodiel, zaplatene:false}));
+  const toAdd=target.filter(m=>!existing.has(m)).map(m=>({sluzba:svc, platca:p, mesiac:m, suma:0, podiely:sh, typ:typ, cena_celkom:cenaCelkom, cena_podiel:cenaPodiel, zaplatene:false, poradie:(Number(svcRows[0].poradie)||100)}));
   if(toAdd.length>0){
     const {error}=await sb.from("platby").insert(toAdd);
     if(error){ setStatus("Chyba: "+error.message,"err"); return; }
@@ -395,6 +419,26 @@ async function deleteService(svc){
   setStatus("Mažem…","ok");
   const {error}=await sb.from("platby").delete().eq("sluzba",svc);
   if(error){ setStatus("Chyba: "+error.message,"err"); return; }
+  await reloadOnly();
+}
+async function moveService(svc, dir){
+  // aktuálne poradie služieb
+  const svcOrder={};
+  rows.forEach(r=>{ const o=Number(r.poradie)||100; if(!(r.sluzba in svcOrder)||o<svcOrder[r.sluzba]) svcOrder[r.sluzba]=o; });
+  const ordered=[...new Set(rows.map(r=>r.sluzba))].sort((a,b)=>{
+    const d=(svcOrder[a]??100)-(svcOrder[b]??100); return d!==0?d:a.localeCompare(b,"sk");
+  });
+  const idx=ordered.indexOf(svc);
+  const swapIdx=idx+dir;
+  if(swapIdx<0||swapIdx>=ordered.length) return;
+  const other=ordered[swapIdx];
+  // prepíš poradie: priraď postupné čísla 1..N, ale so svc a other prehodenými
+  const newOrder=[...ordered];
+  newOrder[idx]=other; newOrder[swapIdx]=svc;
+  setStatus("Mením poradie…","ok");
+  for(let i=0;i<newOrder.length;i++){
+    await sb.from("platby").update({poradie:i+1}).eq("sluzba",newOrder[i]);
+  }
   await reloadOnly();
 }
 async function changeType(svc){
@@ -440,7 +484,7 @@ async function addPerson(svc){
   if(fromVal){ const fromDate=fromVal+"-01"; months=months.filter(m=>m>=fromDate); }
   if(toVal){ const toDate=toVal+"-01"; months=months.filter(m=>m<=toDate); }
   if(months.length===0){ setStatus("Pre zvolené obdobie služba nemá mesiace.","err"); return; }
-  const newRows=months.map(m=>({sluzba:svc, platca:name, mesiac:m, suma:0, podiely:sh, typ:typ, cena_celkom:cenaCelkom, cena_podiel:cenaPodiel, zaplatene:false}));
+  const newRows=months.map(m=>({sluzba:svc, platca:name, mesiac:m, suma:0, podiely:sh, typ:typ, cena_celkom:cenaCelkom, cena_podiel:cenaPodiel, zaplatene:false, poradie:(Number(svcRows[0].poradie)||100)}));
   setStatus("Pridávam…","ok");
   const {error}=await sb.from("platby").insert(newRows);
   if(error){ setStatus("Chyba: "+error.message,"err"); return; }
@@ -452,13 +496,15 @@ async function addService(){
   const price=parseFloat(document.getElementById("newSvcUnit").value)||0;
   const people=(document.getElementById("newSvcPeople").value||"").split(",").map(s=>s.trim()).filter(Boolean);
   if(!name||people.length===0){ setStatus("Zadaj názov služby aj aspoň jednu osobu.","err"); return; }
+  const maxOrder=rows.reduce((a,r)=>Math.max(a,Number(r.poradie)||0),0);
+  const newPoradie=maxOrder+1;
   const newRows=[];
   for(let i=0;i<HORIZON;i++){
     let y=CUR_Y, m=CUR_M+i; while(m>11){m-=12;y++;}
     const dateStr=ymdFromYM(y,m);
     people.forEach(p=>{
       newRows.push({sluzba:name, platca:p, mesiac:dateStr, suma:0, podiely:1, typ:typ,
-        cena_celkom: typ==="fix"?price:0, cena_podiel: typ==="lic"?price:0, zaplatene:false});
+        cena_celkom: typ==="fix"?price:0, cena_podiel: typ==="lic"?price:0, zaplatene:false, poradie:newPoradie});
     });
   }
   setStatus("Vytváram službu…","ok");
