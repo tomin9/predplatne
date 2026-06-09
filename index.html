@@ -135,7 +135,8 @@ async function loadData(){
   const {data, error} = await sb.from("platby").select("*").order("mesiac");
   if(error){ setStatus("Chyba pri načítaní: "+error.message,"err"); return; }
   rows = data || [];
-  await autoFillMonths();
+  // auto-dopĺňanie vypnuté – mesiace sú vytvorené v databáze až do 2050
+  // await autoFillMonths();
   setStatus("",null);
   render();
 }
@@ -486,8 +487,8 @@ async function addPerson(svc){
   if(months.length===0){ setStatus("Pre zvolené obdobie služba nemá mesiace.","err"); return; }
   const newRows=months.map(m=>({sluzba:svc, platca:name, mesiac:m, suma:0, podiely:sh, typ:typ, cena_celkom:cenaCelkom, cena_podiel:cenaPodiel, zaplatene:false, poradie:(Number(svcRows[0].poradie)||100)}));
   setStatus("Pridávam…","ok");
-  const {error}=await sb.from("platby").insert(newRows);
-  if(error){ setStatus("Chyba: "+error.message,"err"); return; }
+  const err1=await insertBatched(newRows);
+  if(err1){ setStatus("Chyba: "+err1.message,"err"); return; }
   await reloadOnly();
 }
 async function addService(){
@@ -499,20 +500,31 @@ async function addService(){
   const maxOrder=rows.reduce((a,r)=>Math.max(a,Number(r.poradie)||0),0);
   const newPoradie=maxOrder+1;
   const newRows=[];
-  for(let i=0;i<HORIZON;i++){
-    let y=CUR_Y, m=CUR_M+i; while(m>11){m-=12;y++;}
-    const dateStr=ymdFromYM(y,m);
-    people.forEach(p=>{
-      newRows.push({sluzba:name, platca:p, mesiac:dateStr, suma:0, podiely:1, typ:typ,
-        cena_celkom: typ==="fix"?price:0, cena_podiel: typ==="lic"?price:0, zaplatene:false, poradie:newPoradie});
-    });
+  // roky 2020 až 2036
+  for(let y=2020; y<=2036; y++){
+    for(let m=0;m<12;m++){
+      const dateStr=ymdFromYM(y,m);
+      people.forEach(p=>{
+        newRows.push({sluzba:name, platca:p, mesiac:dateStr, suma:0, podiely:1, typ:typ,
+          cena_celkom: typ==="fix"?price:0, cena_podiel: typ==="lic"?price:0, zaplatene:false, poradie:newPoradie});
+      });
+    }
   }
   setStatus("Vytváram službu…","ok");
-  const {error}=await sb.from("platby").insert(newRows);
-  if(error){ setStatus("Chyba: "+error.message,"err"); return; }
+  const err2=await insertBatched(newRows);
+  if(err2){ setStatus("Chyba: "+err2.message,"err"); return; }
   await reloadOnly();
 }
 
+async function insertBatched(allRows){
+  const SIZE=500;
+  for(let i=0;i<allRows.length;i+=SIZE){
+    const batch=allRows.slice(i,i+SIZE);
+    const {error}=await sb.from("platby").insert(batch);
+    if(error) return error;
+  }
+  return null;
+}
 async function reloadOnly(){
   const {data, error} = await sb.from("platby").select("*").order("mesiac");
   if(error){ setStatus("Chyba: "+error.message,"err"); return; }
