@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zdieľané predplatné</title>
+<style>
+  :root{
+    --bg:#faf9f5; --card:#ffffff; --border:rgba(0,0,0,0.12); --border2:rgba(0,0,0,0.22);
+    --text:#1a1a18; --text2:#6b6a64; --text3:#9a988f;
+    --success-bg:#e1f5ee; --success-tx:#0f6e56;
+    --accent-bg:#f1efe8; --info-tx:#185fa5;
+  }
+  *{box-sizing:border-box;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); margin:0; padding:24px; line-height:1.6;}
+  .wrap{max-width:1040px; margin:0 auto;}
+  h1{font-size:22px; font-weight:600; margin:0 0 4px;}
+  h3{font-size:16px; font-weight:600; margin:24px 0 12px;}
+  .sub{color:var(--text2); font-size:14px; margin-bottom:16px;}
+  .status{font-size:13px; padding:8px 12px; border-radius:8px; margin-bottom:16px; display:none;}
+  .status.show{display:block;}
+  .status.err{background:#fde8e8; color:#9b1c1c;}
+  .status.ok{background:var(--success-bg); color:var(--success-tx);}
+  .bar{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:20px;}
+  .bar span{font-size:14px; color:var(--text2);}
+  select,input,button{font-family:inherit; font-size:14px; padding:7px 10px; border:0.5px solid var(--border2); border-radius:8px; background:var(--card); color:var(--text);}
+  button{cursor:pointer; transition:background .12s;}
+  button:hover{background:var(--accent-bg);}
+  .card{background:var(--card); border:0.5px solid var(--border); border-radius:12px; padding:16px 20px; margin-bottom:12px;}
+  .cname{font-weight:600; font-size:15px; margin-bottom:8px;}
+  .meta{font-size:13px; color:var(--text2); margin-bottom:6px;}
+  table{border-collapse:collapse; font-size:13px;}
+  th{font-size:11px; font-weight:400; color:var(--text3); padding:2px; min-width:32px;}
+  td{padding:3px;}
+  .pname{text-align:left; padding:4px 8px 4px 0; white-space:nowrap; font-size:13px;}
+  .cnt{color:var(--text3);}
+  .chk{display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:6px; cursor:pointer; border:0.5px solid var(--border2); user-select:none; font-size:14px;}
+  .chk.on{background:var(--success-bg); color:var(--success-tx);}
+  .chk.saving{opacity:0.4;}
+  .scroll{overflow-x:auto; margin-top:4px;}
+  .totals{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px;}
+  .tcard{background:var(--accent-bg); border-radius:8px; padding:12px 14px;}
+  .tcard .lbl{font-size:13px; color:var(--text2); margin-bottom:2px;}
+  .tcard .val{font-size:20px; font-weight:600;}
+  .tcard .det{font-size:11px; color:var(--text3); margin-top:3px;}
+  .loading{text-align:center; color:var(--text2); padding:40px;}
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#262624;--card:#1f1f1d;--border:rgba(255,255,255,0.14);--border2:rgba(255,255,255,0.24);--text:#f2f1ec;--text2:#a8a69e;--text3:#76746c;--success-bg:#085041;--success-tx:#9fe1cb;--accent-bg:#2c2c2a;--info-tx:#85b7eb;}
+    .status.err{background:#4a1515;color:#f8b4b4;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Zdieľané predplatné</h1>
+  <div class="sub">Spoločný živý prehľad · odklikni zaplatený mesiac, uloží sa pre všetkých</div>
+  <div id="status" class="status"></div>
+
+  <div class="bar">
+    <span>Od</span>
+    <select id="startMonth"></select>
+    <span>· zobraziť</span>
+    <select id="monthCount">
+      <option value="6">6 mesiacov</option>
+      <option value="12" selected>12 mesiacov</option>
+      <option value="24">24 mesiacov</option>
+    </select>
+    <button id="reloadBtn">↻ Obnoviť</button>
+  </div>
+
+  <div id="services"><div class="loading">Načítavam dáta…</div></div>
+
+  <h3>Mesačný súčet na osobu</h3>
+  <div class="totals" id="totals"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://rylerqcsihuftyejwxhz.supabase.co";
+const SUPABASE_KEY = "sb_publishable_-JdT9Ve8eHtlwM5RAz1vXA_b2vcu150";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const MONTHS = ["jan","feb","mar","apr","máj","jún","júl","aug","sep","okt","nov","dec"];
+let rows = [];
+let startY=2026, startM=4, count=12;
+
+function setStatus(msg, type){
+  const el=document.getElementById("status");
+  if(!msg){ el.className="status"; el.textContent=""; return; }
+  el.className="status show "+type; el.textContent=msg;
+}
+function eur(n){ return n.toLocaleString("sk-SK",{minimumFractionDigits:2,maximumFractionDigits:2})+" €"; }
+function ymKey(d){ const dt=new Date(d); return dt.getFullYear()+"-"+dt.getMonth(); }
+
+function buildStartOptions(){
+  const sel=document.getElementById("startMonth"); sel.innerHTML="";
+  for(let y=2026;y<=2028;y++) for(let m=0;m<12;m++){
+    const o=document.createElement("option"); o.value=y+"-"+m;
+    o.textContent=MONTHS[m]+" "+y; if(y===startY&&m===startM)o.selected=true; sel.appendChild(o);
+  }
+}
+function monthKeys(){
+  const keys=[]; let y=startY,m=startM;
+  for(let i=0;i<count;i++){ keys.push({key:y+"-"+m,label:(m+1)+"/"+String(y).slice(2)}); m++; if(m>11){m=0;y++;} }
+  return keys;
+}
+
+async function loadData(){
+  setStatus("Načítavam…","ok");
+  const {data, error} = await sb.from("platby").select("*").order("mesiac");
+  if(error){ setStatus("Chyba pri načítaní: "+error.message,"err"); return; }
+  rows = data || [];
+  setStatus("",null);
+  render();
+}
+
+function render(){
+  const wrap=document.getElementById("services"); wrap.innerHTML="";
+  const mk=monthKeys();
+  // zoskup podľa služby
+  const services=[...new Set(rows.map(r=>r.sluzba))];
+  if(services.length===0){ wrap.innerHTML='<div class="loading">Žiadne platby. Spusti seed.sql v Supabase.</div>'; return; }
+
+  services.forEach(svc=>{
+    const svcRows=rows.filter(r=>r.sluzba===svc);
+    const people=[...new Set(svcRows.map(r=>r.platca))];
+    const card=document.createElement("div"); card.className="card";
+    let body=`<div class="cname">${svc}</div>`;
+    let trs=people.map(p=>{
+      let cells=mk.map(m=>{
+        const row=svcRows.find(r=>r.platca===p && ymKey(r.mesiac)===m.key);
+        if(!row) return `<td></td>`;
+        const on=row.zaplatene;
+        return `<td><span class="chk ${on?'on':''}" data-id="${row.id}">${on?'✓':''}</span></td>`;
+      }).join("");
+      const paid=mk.filter(m=>{const r=svcRows.find(r=>r.platca===p && ymKey(r.mesiac)===m.key); return r&&r.zaplatene;}).length;
+      const inRange=mk.filter(m=>svcRows.find(r=>r.platca===p && ymKey(r.mesiac)===m.key)).length;
+      return `<tr><td class="pname">${p} <span class="cnt">(${paid}/${inRange})</span></td>${cells}</tr>`;
+    }).join("");
+    const header=`<tr><th></th>${mk.map(m=>`<th>${m.label}</th>`).join("")}</tr>`;
+    body+=`<div class="scroll"><table>${header}${trs}</table></div>`;
+    card.innerHTML=body; wrap.appendChild(card);
+  });
+
+  wrap.querySelectorAll("[data-id]").forEach(el=>el.addEventListener("click",()=>toggle(el)));
+  renderTotals();
+}
+
+async function toggle(el){
+  const id=+el.dataset.id;
+  const row=rows.find(r=>r.id===id); if(!row) return;
+  const newVal=!row.zaplatene;
+  el.classList.add("saving");
+  const {error}=await sb.from("platby").update({zaplatene:newVal}).eq("id",id);
+  el.classList.remove("saving");
+  if(error){ setStatus("Nepodarilo sa uložiť: "+error.message,"err"); return; }
+  row.zaplatene=newVal; render();
+}
+
+function renderTotals(){
+  const byP={};
+  rows.forEach(r=>{
+    byP[r.platca]=byP[r.platca]||{eur:0};
+    byP[r.platca].eur+=Number(r.suma);
+  });
+  // mesačný súčet = suma jednej inštancie každej služby na osobu (delíme počtom mesiacov v DB)
+  const monthsInDb=new Set(rows.map(r=>ymKey(r.mesiac))).size || 1;
+  const el=document.getElementById("totals"); el.innerHTML="";
+  Object.keys(byP).sort().forEach(p=>{
+    const monthly=byP[p].eur/monthsInDb;
+    const d=document.createElement("div"); d.className="tcard";
+    d.innerHTML=`<div class="lbl">${p}</div><div class="val">${eur(monthly)}</div><div class="det">mesačne · celkom ${eur(byP[p].eur)}</div>`;
+    el.appendChild(d);
+  });
+}
+
+document.getElementById("startMonth").addEventListener("change",e=>{const[y,m]=e.target.value.split("-").map(Number);startY=y;startM=m;render();});
+document.getElementById("monthCount").addEventListener("change",e=>{count=+e.target.value;render();});
+document.getElementById("reloadBtn").addEventListener("click",loadData);
+
+buildStartOptions();
+loadData();
+</script>
+</body>
+</html>
