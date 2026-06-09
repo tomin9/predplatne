@@ -283,7 +283,7 @@ function bindEvents(){
   wrap.querySelectorAll("[data-delsvc]").forEach(el=>el.addEventListener("click",()=>deleteService(el.dataset.delsvc)));
   wrap.querySelectorAll("[data-svctype]").forEach(el=>el.addEventListener("click",()=>changeType(el.dataset.svctype)));
   wrap.querySelectorAll("[data-priceedit]").forEach(el=>el.addEventListener("click",e=>{e.preventDefault();const[s,t]=el.dataset.priceedit.split("|");changePrice(s,t);}));
-  wrap.querySelectorAll("[data-renameper]").forEach(el=>el.addEventListener("click",()=>{const[s,p]=el.dataset.renameper.split("|");renamePerson(s,p);}));
+  wrap.querySelectorAll("[data-renameper]").forEach(el=>el.addEventListener("click",()=>{const[s,p]=el.dataset.renameper.split("|");editPerson(s,p);}));
   wrap.querySelectorAll("[data-delper]").forEach(el=>el.addEventListener("click",()=>{const[s,p]=el.dataset.delper.split("|");deletePerson(s,p);}));
   wrap.querySelectorAll("[data-addper]").forEach(el=>el.addEventListener("click",()=>addPerson(el.dataset.addper)));
 }
@@ -306,6 +306,76 @@ async function renameService(svc){
   if(error){ setStatus("Chyba: "+error.message,"err"); return; }
   await reloadOnly();
 }
+async function editPerson(svc,p){
+  const choice=prompt(`Úprava: ${p} (${svc})\n\nNapíš číslo akcie:\n1 = premenovať\n2 = obdobie (od–do)\n3 = podiely\n`, "1");
+  if(choice===null) return;
+  if(choice.trim()==="1") return renamePerson(svc,p);
+  if(choice.trim()==="2") return setPeriod(svc,p);
+  if(choice.trim()==="3") return setShares(svc,p);
+}
+
+async function setPeriod(svc,p){
+  const pRows=rows.filter(r=>r.sluzba===svc && r.platca===p);
+  const months=pRows.map(r=>r.mesiac).sort();
+  const curFrom=months[0]?months[0].slice(0,7):"";
+  const curTo=months[months.length-1]?months[months.length-1].slice(0,7):"";
+  const from=prompt(`Od ktorého mesiaca je ${p} aktívny/a? (RRRR-MM)`, curFrom);
+  if(from===null) return;
+  const to=prompt(`Do ktorého mesiaca? (RRRR-MM, prázdne = do konca existujúcich)`, curTo);
+  if(to===null) return;
+  const fromDate=from.trim()+"-01";
+  const toDate=to.trim()? (to.trim()+"-01") : null;
+
+  // mesiace služby (od ktorejkoľvek osoby), aby sme vedeli rozsah dát
+  const svcMonths=[...new Set(rows.filter(r=>r.sluzba===svc).map(r=>r.mesiac))].sort();
+
+  // ktoré mesiace má mať po novom
+  let target=svcMonths.filter(m=>m>=fromDate && (toDate? m<=toDate : true));
+
+  // OCHRANA: skracovanie nesmie zmazať mesiac so zakliknutou platbou
+  const toRemove=pRows.filter(r=> r.mesiac<fromDate || (toDate && r.mesiac>toDate));
+  const paidRemoved=toRemove.filter(r=>r.zaplatene);
+  if(paidRemoved.length>0){
+    const ms=paidRemoved.map(r=>r.mesiac.slice(0,7)).join(", ");
+    setStatus(`Nedá sa skrátiť: mesiace so zaplatenou platbou (${ms}). Najprv ich odznač.`,"err");
+    return;
+  }
+
+  setStatus("Ukladám obdobie…","ok");
+  // zmaž mesiace mimo rozsahu
+  if(toRemove.length>0){
+    const ids=toRemove.map(r=>r.id);
+    const {error}=await sb.from("platby").delete().in("id",ids);
+    if(error){ setStatus("Chyba: "+error.message,"err"); return; }
+  }
+  // doplň chýbajúce mesiace v rozsahu
+  const existing=new Set(pRows.map(r=>r.mesiac));
+  const svcRows=rows.filter(r=>r.sluzba===svc);
+  const typ=svcRows[0].typ||"fix";
+  const cenaCelkom=Number(svcRows[0].cena_celkom)||0;
+  const cenaPodiel=Number(svcRows[0].cena_podiel)||0;
+  const sh=pRows[0]?(pRows[0].podiely||1):1;
+  const toAdd=target.filter(m=>!existing.has(m)).map(m=>({sluzba:svc, platca:p, mesiac:m, suma:0, podiely:sh, typ:typ, cena_celkom:cenaCelkom, cena_podiel:cenaPodiel, zaplatene:false}));
+  if(toAdd.length>0){
+    const {error}=await sb.from("platby").insert(toAdd);
+    if(error){ setStatus("Chyba: "+error.message,"err"); return; }
+  }
+  await reloadOnly();
+}
+
+async function setShares(svc,p){
+  const pRows=rows.filter(r=>r.sluzba===svc && r.platca===p);
+  const cur=pRows[0]?(pRows[0].podiely||1):1;
+  const u=prompt(`Počet podielov pre ${p} (${svc}):`, cur);
+  if(u===null) return;
+  const sh=Math.max(1,parseInt(u)||1);
+  setStatus("Ukladám podiely…","ok");
+  const ids=pRows.map(r=>r.id);
+  const {error}=await sb.from("platby").update({podiely:sh}).in("id",ids);
+  if(error){ setStatus("Chyba: "+error.message,"err"); return; }
+  await reloadOnly();
+}
+
 async function renamePerson(svc,p){
   const name=prompt(`Nové meno (${p}) v službe ${svc}:`, p); if(!name||name===p) return;
   setStatus("Premenúvam…","ok");
