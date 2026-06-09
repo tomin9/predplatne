@@ -132,7 +132,7 @@ function monthKeys(){
 
 async function loadData(){
   setStatus("Načítavam…","ok");
-  const {data, error} = await sb.from("platby").select("*").order("mesiac");
+  const {data, error} = await sb.from("platby").select("*").order("mesiac").range(0,99999);
   if(error){ setStatus("Chyba pri načítaní: "+error.message,"err"); return; }
   rows = data || [];
   // auto-dopĺňanie vypnuté – mesiace sú vytvorené v databáze až do 2050
@@ -177,7 +177,7 @@ async function autoFillMonths(){
   if(newRows.length>0){
     const {error}=await sb.from("platby").insert(newRows);
     if(!error){
-      const {data}=await sb.from("platby").select("*").order("mesiac");
+      const {data}=await sb.from("platby").select("*").order("mesiac").range(0,99999);
       rows=data||rows;
     }
   }
@@ -526,7 +526,7 @@ async function insertBatched(allRows){
   return null;
 }
 async function reloadOnly(){
-  const {data, error} = await sb.from("platby").select("*").order("mesiac");
+  const {data, error} = await sb.from("platby").select("*").order("mesiac").range(0,99999);
   if(error){ setStatus("Chyba: "+error.message,"err"); return; }
   rows=data||[]; setStatus("",null); render();
 }
