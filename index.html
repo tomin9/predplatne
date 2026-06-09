@@ -55,6 +55,8 @@
   .tcard{background:var(--accent-bg); border-radius:8px; padding:12px 14px;}
   .tcard .lbl{font-size:13px; color:var(--text2); margin-bottom:2px;}
   .tcard .val{font-size:20px; font-weight:600;}
+  .tcard .paid{color:var(--success-tx);}
+  .tcard .plan{color:var(--text3); font-weight:500; font-size:16px;}
   .tcard .det{font-size:11px; color:var(--text3); margin-top:3px;}
   .loading{text-align:center; color:var(--text2); padding:40px;}
   .editbtn{font-size:12px; padding:3px 8px; margin-left:4px;}
@@ -532,14 +534,23 @@ async function reloadOnly(){
 }
 
 function renderTotals(){
-  // súčet za zobrazený rok
+  // súčet za zobrazený rok: plánované (všetko) a zaplatené (len odklikané)
   const mk=monthKeys(); const keys=new Set(mk.map(m=>m.key));
-  const byP={};
-  rows.forEach(r=>{ if(keys.has(ymKey(r.mesiac))) byP[r.platca]=(byP[r.platca]||0)+rowAmount(r); });
+  const plan={}, paid={};
+  rows.forEach(r=>{
+    if(keys.has(ymKey(r.mesiac))){
+      const a=rowAmount(r);
+      plan[r.platca]=(plan[r.platca]||0)+a;
+      if(r.zaplatene) paid[r.platca]=(paid[r.platca]||0)+a;
+    }
+  });
   const el=document.getElementById("totals"); el.innerHTML="";
-  Object.keys(byP).sort().forEach(p=>{
+  Object.keys(plan).sort().forEach(p=>{
+    const pl=plan[p]||0, pa=paid[p]||0;
     const d=document.createElement("div"); d.className="tcard";
-    d.innerHTML=`<div class="lbl">${p}</div><div class="val">${eur(byP[p])}</div><div class="det">za rok ${viewYear}</div>`;
+    d.innerHTML=`<div class="lbl">${p}</div>
+      <div class="val"><span class="paid">${eur(pa)}</span> <span class="plan">/ ${eur(pl)}</span></div>
+      <div class="det">zaplatené / plánované · rok ${viewYear}</div>`;
     el.appendChild(d);
   });
 }
