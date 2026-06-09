@@ -24,6 +24,7 @@
   .status.ok{background:var(--success-bg); color:var(--success-tx);}
   .bar{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:20px;}
   .bar span{font-size:14px; color:var(--text2);}
+  .yearlbl{font-size:18px; font-weight:600; min-width:64px; text-align:center;}
   select,input,button{font-family:inherit; font-size:14px; padding:7px 10px; border:0.5px solid var(--border2); border-radius:8px; background:var(--card); color:var(--text);}
   button{cursor:pointer; transition:background .12s;}
   button:hover{background:var(--accent-bg);}
@@ -44,7 +45,6 @@
   th.now{color:var(--info-tx); font-weight:600;}
   td{padding:3px; text-align:center;}
   .pname{text-align:left; padding:4px 8px 4px 0; white-space:nowrap; font-size:13px;}
-  .pamt{color:var(--text3); font-size:12px;}
   .cnt{color:var(--text3);}
   .chk{display:inline-flex; align-items:center; justify-content:center; min-width:56px; height:26px; padding:0 6px; border-radius:6px; cursor:pointer; border:0.5px solid var(--border2); user-select:none; font-size:12px; white-space:nowrap;}
   .chk.on{background:var(--success-bg); color:var(--success-tx);}
@@ -75,14 +75,14 @@
 <body>
 <div class="wrap">
   <h1>Zdieľané predplatné</h1>
-  <div class="sub">Spoločný živý prehľad · vždy 12 mesiacov dopredu · odklikni zaplatený mesiac</div>
+  <div class="sub">Spoločný živý prehľad · zobrazenie po kalendárnych rokoch · odklikni zaplatený mesiac</div>
   <div id="status" class="status"></div>
 
   <div class="bar">
-    <button id="prevBtn">← staršie</button>
-    <span id="rangeLabel"></span>
-    <button id="nextBtn">novšie →</button>
-    <button id="todayBtn">dnes</button>
+    <button id="prevBtn">←</button>
+    <span class="yearlbl" id="yearLabel"></span>
+    <button id="nextBtn">→</button>
+    <button id="todayBtn">tento rok</button>
     <button id="reloadBtn">↻ Obnoviť</button>
     <button id="editBtn" class="editmode">✏️ Upraviť</button>
   </div>
@@ -91,7 +91,7 @@
   <div id="services"><div class="loading">Načítavam dáta…</div></div>
   <div id="addServiceBox"></div>
 
-  <h3>Mesačný súčet na osobu</h3>
+  <h3>Súčet na osobu (zobrazený rok)</h3>
   <div class="totals" id="totals"></div>
 </div>
 
@@ -102,14 +102,14 @@ const SUPABASE_KEY = "sb_publishable_-JdT9Ve8eHtlwM5RAz1vXA_b2vcu150";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const MONTHS = ["jan","feb","mar","apr","máj","jún","júl","aug","sep","okt","nov","dec"];
-const HORIZON = 12; // koľko mesiacov dopredu držať
+const HORIZON = 12;
 let rows = [];
-let viewOffset = 0; // 0 = od aktuálneho mesiaca; záporné = staršie
 let editMode=false;
 
 const now = new Date();
 const CUR_Y = now.getFullYear();
 const CUR_M = now.getMonth();
+let viewYear = CUR_Y;
 
 function setStatus(msg, type){
   const el=document.getElementById("status");
@@ -118,18 +118,13 @@ function setStatus(msg, type){
 }
 function eur(n){ return n.toLocaleString("sk-SK",{minimumFractionDigits:2,maximumFractionDigits:2})+" €"; }
 function ymKey(d){ const dt=new Date(d); return dt.getFullYear()+"-"+dt.getMonth(); }
-function keyFromYM(y,m){ return y+"-"+m; }
 function ymdFromYM(y,m){ return y+"-"+String(m+1).padStart(2,"0")+"-01"; }
-function curKey(){ return keyFromYM(CUR_Y,CUR_M); }
 
-// vráti pole {key,label,y,m,isNow} pre zobrazené okno (12 mes. od akt.+offset)
+// 12 mesiacov zobrazeného kalendárneho roka
 function monthKeys(){
   const keys=[];
-  let y=CUR_Y, m=CUR_M + viewOffset;
-  while(m<0){ m+=12; y--; } while(m>11){ m-=12; y++; }
-  for(let i=0;i<HORIZON;i++){
-    keys.push({key:keyFromYM(y,m), label:(m+1)+"/"+String(y).slice(2), y, m, isNow:(y===CUR_Y&&m===CUR_M)});
-    m++; if(m>11){m=0;y++;}
+  for(let m=0;m<12;m++){
+    keys.push({key:viewYear+"-"+m, label:(m+1)+"/"+String(viewYear).slice(2), y:viewYear, m, isNow:(viewYear===CUR_Y&&m===CUR_M)});
   }
   return keys;
 }
@@ -139,12 +134,12 @@ async function loadData(){
   const {data, error} = await sb.from("platby").select("*").order("mesiac");
   if(error){ setStatus("Chyba pri načítaní: "+error.message,"err"); return; }
   rows = data || [];
-  await autoFillMonths();   // doplní chýbajúce mesiace dopredu
+  await autoFillMonths();
   setStatus("",null);
   render();
 }
 
-// Auto-doplnenie: pre každú službu zabezpeč, že existuje HORIZON mesiacov od aktuálneho
+// doplní HORIZON mesiacov dopredu od aktuálneho mesiaca (rolujúce, na pozadí)
 async function autoFillMonths(){
   if(rows.length===0) return;
   const services=[...new Set(rows.map(r=>r.sluzba))];
@@ -191,7 +186,7 @@ function rowAmount(row){
 
 function render(){
   const mk=monthKeys();
-  document.getElementById("rangeLabel").textContent = `${mk[0].label} – ${mk[mk.length-1].label}`;
+  document.getElementById("yearLabel").textContent = viewYear;
   const wrap=document.getElementById("services"); wrap.innerHTML="";
   const services=[...new Set(rows.map(r=>r.sluzba))];
   if(services.length===0 && !editMode){ wrap.innerHTML='<div class="loading">Žiadne platby v databáze.</div>'; }
@@ -213,26 +208,23 @@ function render(){
         ? `<a href="#" class="priceEdit" data-priceedit="${svc}|fix">${eur(total)}</a>`
         : `<strong>${eur(total)}</strong>`;
       metaLine = `<span class="tag fix">pevná cena</span>
-        <div class="meta">Celkom ${priceEl}/mes. · ${firstM.label}: ${totalShares} podielov = <strong>${eur(perShare)}</strong>/podiel <span class="perv">(cena na osobu sa mení podľa počtu ľudí v danom mesiaci)</span></div>`;
+        <div class="meta">Celkom ${priceEl}/mes. · cena na osobu sa mení podľa počtu ľudí v danom mesiaci</div>`;
     } else {
       const unit=Number(monthRows[0]?.cena_podiel)||0;
       const priceEl = editMode
         ? `<a href="#" class="priceEdit" data-priceedit="${svc}|lic">${eur(unit)}</a>`
         : `<strong>${eur(unit)}</strong>`;
       metaLine = `<span class="tag lic">za licenciu</span>
-        <div class="meta">${priceEl}/licenciu · ${firstM.label}: ${totalShares} licencií = <strong>${eur(unit*totalShares)}</strong> spolu</div>`;
+        <div class="meta">${priceEl}/licenciu · platí každý člen za seba</div>`;
     }
 
     const card=document.createElement("div"); card.className="card";
     let editControls = editMode ? `
       <button class="editbtn" data-renamesvc="${svc}">Premenovať</button>
-      <button class="editbtn" data-svcsettings="${svc}">Cena/typ</button>
+      <button class="editbtn" data-svctype="${svc}">Typ</button>
       <button class="editbtn danger" data-delsvc="${svc}">Zmazať službu</button>` : "";
 
     let trs=people.map(p=>{
-      const pRowFirst=monthRows.find(r=>r.platca===p);
-      const sh=pRowFirst?(pRowFirst.podiely||1):1;
-      const amtFirst=pRowFirst?rowAmount(pRowFirst):0;
       let cells=mk.map(m=>{
         const row=svcRows.find(r=>r.platca===p && ymKey(r.mesiac)===m.key);
         if(!row) return `<td></td>`;
@@ -240,8 +232,6 @@ function render(){
         const a=rowAmount(row);
         return `<td><span class="chk ${on?'on':''}" data-id="${row.id}" title="${m.label}: ${eur(a)}">${on?eur(a):''}</span></td>`;
       }).join("");
-      const paid=mk.filter(m=>{const r=svcRows.find(r=>r.platca===p && ymKey(r.mesiac)===m.key); return r&&r.zaplatene;}).length;
-      const inRange=mk.filter(m=>svcRows.find(r=>r.platca===p && ymKey(r.mesiac)===m.key)).length;
       const pEdit = editMode ? `<button class="editbtn" data-renameper="${svc}|${p}">✎</button><button class="editbtn danger" data-delper="${svc}|${p}">✕</button>` : "";
       return `<tr><td class="pname">${p} ${pEdit}</td>${cells}</tr>`;
     }).join("");
@@ -249,12 +239,13 @@ function render(){
 
     let editTools = "";
     if(editMode){
-      const fromDefault = mk[0].y+"-"+String(mk[0].m+1).padStart(2,"0");
+      const y0=viewYear;
       editTools = `
         <div class="editrow"><span class="lbl">Pridať osobu:</span>
           <input placeholder="meno" data-addpername="${svc}"/>
-          <span class="lbl">podiely</span><input type="number" min="1" value="1" style="width:60px" data-addpersh="${svc}"/>
-          <span class="lbl">od</span><input type="month" data-addperfrom="${svc}" value="${fromDefault}" style="width:140px"/>
+          <span class="lbl">podiely</span><input type="number" min="1" value="1" style="width:56px" data-addpersh="${svc}"/>
+          <span class="lbl">od</span><input type="month" data-addperfrom="${svc}" value="${y0}-01" style="width:140px"/>
+          <span class="lbl">do</span><input type="month" data-addperto="${svc}" placeholder="(voliteľné)" style="width:140px"/>
           <button class="editbtn primary" data-addper="${svc}">Pridať</button>
         </div>`;
     }
@@ -290,7 +281,7 @@ function bindEvents(){
   wrap.querySelectorAll("[data-id]").forEach(el=>el.addEventListener("click",()=>{ if(!editMode) toggle(el); }));
   wrap.querySelectorAll("[data-renamesvc]").forEach(el=>el.addEventListener("click",()=>renameService(el.dataset.renamesvc)));
   wrap.querySelectorAll("[data-delsvc]").forEach(el=>el.addEventListener("click",()=>deleteService(el.dataset.delsvc)));
-  wrap.querySelectorAll("[data-svcsettings]").forEach(el=>el.addEventListener("click",()=>serviceSettings(el.dataset.svcsettings)));
+  wrap.querySelectorAll("[data-svctype]").forEach(el=>el.addEventListener("click",()=>changeType(el.dataset.svctype)));
   wrap.querySelectorAll("[data-priceedit]").forEach(el=>el.addEventListener("click",e=>{e.preventDefault();const[s,t]=el.dataset.priceedit.split("|");changePrice(s,t);}));
   wrap.querySelectorAll("[data-renameper]").forEach(el=>el.addEventListener("click",()=>{const[s,p]=el.dataset.renameper.split("|");renamePerson(s,p);}));
   wrap.querySelectorAll("[data-delper]").forEach(el=>el.addEventListener("click",()=>{const[s,p]=el.dataset.delper.split("|");deletePerson(s,p);}));
@@ -336,16 +327,25 @@ async function deleteService(svc){
   if(error){ setStatus("Chyba: "+error.message,"err"); return; }
   await reloadOnly();
 }
+async function changeType(svc){
+  const svcRows=rows.filter(r=>r.sluzba===svc);
+  const cur=svcRows[0].typ||"fix";
+  const t=prompt("Typ — 'fix' (pevná cena za službu, delí sa) alebo 'lic' (za licenciu):", cur);
+  if(t===null) return;
+  const typ=(t==="lic")?"lic":"fix";
+  setStatus("Ukladám…","ok");
+  const ids=svcRows.map(r=>r.id);
+  const {error}=await sb.from("platby").update({typ:typ}).in("id",ids);
+  if(error){ setStatus("Chyba: "+error.message,"err"); return; }
+  await reloadOnly();
+}
 async function changePrice(svc, type){
   const svcRows=rows.filter(r=>r.sluzba===svc);
   const cur = type==="fix" ? (Number(svcRows[0].cena_celkom)||0) : (Number(svcRows[0].cena_podiel)||0);
   const label = type==="fix" ? "Nová celková mesačná cena služby v €:" : "Nová cena za 1 licenciu v €:";
   const u=prompt(label, cur); if(u===null) return;
-  const price=parseFloat(u.replace(",","."))||0;
-  // od ktorého mesiaca
-  const mk=monthKeys();
-  const def = mk[0].y+"-"+String(mk[0].m+1).padStart(2,"0");
-  const from=prompt("Od ktorého mesiaca platí nová cena? (formát RRRR-MM, napr. 2026-09)\nStaršie mesiace ostanú s pôvodnou cenou.", def);
+  const price=parseFloat(String(u).replace(",","."))||0;
+  const from=prompt("Od ktorého mesiaca platí nová cena? (RRRR-MM, napr. 2026-09)\nStaršie mesiace ostanú s pôvodnou cenou.", viewYear+"-01");
   if(from===null) return;
   const fromDate=from.trim()+"-01";
   const ids=svcRows.filter(r=>r.mesiac>=fromDate).map(r=>r.id);
@@ -356,30 +356,11 @@ async function changePrice(svc, type){
   if(error){ setStatus("Chyba: "+error.message,"err"); return; }
   await reloadOnly();
 }
-async function serviceSettings(svc){
-  const svcRows=rows.filter(r=>r.sluzba===svc);
-  const curType=svcRows[0].typ||"fix";
-  const t=prompt("Typ — 'fix' (pevná cena za službu) alebo 'lic' (za licenciu):", curType);
-  if(t===null) return;
-  const typ=(t==="lic")?"lic":"fix";
-  const priceLabel = typ==="fix" ? "Celková mesačná cena služby v €:" : "Cena za 1 licenciu v €:";
-  const curPrice = typ==="fix" ? (Number(svcRows[0].cena_celkom)||0) : (Number(svcRows[0].cena_podiel)||0);
-  const u=prompt(priceLabel, curPrice);
-  if(u===null) return;
-  const price=parseFloat(u)||0;
-  setStatus("Ukladám…","ok");
-  const ids=svcRows.map(r=>r.id);
-  if(typ==="fix"){
-    await sb.from("platby").update({typ:"fix", cena_celkom:price, cena_podiel:0}).in("id",ids);
-  } else {
-    await sb.from("platby").update({typ:"lic", cena_podiel:price, cena_celkom:0}).in("id",ids);
-  }
-  await reloadOnly();
-}
 async function addPerson(svc){
   const name=(document.querySelector(`[data-addpername="${svc}"]`).value||"").trim();
   const sh=Math.max(1,parseInt(document.querySelector(`[data-addpersh="${svc}"]`).value)||1);
   const fromVal=document.querySelector(`[data-addperfrom="${svc}"]`).value;
+  const toVal=document.querySelector(`[data-addperto="${svc}"]`).value;
   if(!name){ setStatus("Zadaj meno.","err"); return; }
   const svcRows=rows.filter(r=>r.sluzba===svc);
   const typ=svcRows[0].typ||"fix";
@@ -387,6 +368,7 @@ async function addPerson(svc){
   const cenaPodiel=Number(svcRows[0].cena_podiel)||0;
   let months=[...new Set(svcRows.map(r=>r.mesiac))].sort();
   if(fromVal){ const fromDate=fromVal+"-01"; months=months.filter(m=>m>=fromDate); }
+  if(toVal){ const toDate=toVal+"-01"; months=months.filter(m=>m<=toDate); }
   if(months.length===0){ setStatus("Pre zvolené obdobie služba nemá mesiace.","err"); return; }
   const newRows=months.map(m=>({sluzba:svc, platca:name, mesiac:m, suma:0, podiely:sh, typ:typ, cena_celkom:cenaCelkom, cena_podiel:cenaPodiel, zaplatene:false}));
   setStatus("Pridávam…","ok");
@@ -415,7 +397,6 @@ async function addService(){
   await reloadOnly();
 }
 
-// reload bez auto-fill (po editoch), aby sa nezmazalo to, čo práve robíme
 async function reloadOnly(){
   const {data, error} = await sb.from("platby").select("*").order("mesiac");
   if(error){ setStatus("Chyba: "+error.message,"err"); return; }
@@ -423,21 +404,21 @@ async function reloadOnly(){
 }
 
 function renderTotals(){
-  const monthsInDb = new Set(rows.map(r=>ymKey(r.mesiac))).size || 1;
+  // súčet za zobrazený rok
+  const mk=monthKeys(); const keys=new Set(mk.map(m=>m.key));
   const byP={};
-  rows.forEach(r=>{ byP[r.platca]=(byP[r.platca]||0)+rowAmount(r); });
+  rows.forEach(r=>{ if(keys.has(ymKey(r.mesiac))) byP[r.platca]=(byP[r.platca]||0)+rowAmount(r); });
   const el=document.getElementById("totals"); el.innerHTML="";
   Object.keys(byP).sort().forEach(p=>{
-    const monthly=byP[p]/monthsInDb;
     const d=document.createElement("div"); d.className="tcard";
-    d.innerHTML=`<div class="lbl">${p}</div><div class="val">~${eur(monthly)}</div><div class="det">priemer/mes. · celkom ${eur(byP[p])}</div>`;
+    d.innerHTML=`<div class="lbl">${p}</div><div class="val">${eur(byP[p])}</div><div class="det">za rok ${viewYear}</div>`;
     el.appendChild(d);
   });
 }
 
-document.getElementById("prevBtn").addEventListener("click",()=>{viewOffset-=HORIZON; render();});
-document.getElementById("nextBtn").addEventListener("click",()=>{viewOffset+=HORIZON; render();});
-document.getElementById("todayBtn").addEventListener("click",()=>{viewOffset=0; render();});
+document.getElementById("prevBtn").addEventListener("click",()=>{viewYear--; render();});
+document.getElementById("nextBtn").addEventListener("click",()=>{viewYear++; render();});
+document.getElementById("todayBtn").addEventListener("click",()=>{viewYear=CUR_Y; render();});
 document.getElementById("reloadBtn").addEventListener("click",loadData);
 document.getElementById("editBtn").addEventListener("click",e=>{
   editMode=!editMode;
