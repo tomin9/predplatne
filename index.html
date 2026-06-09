@@ -40,13 +40,13 @@
   .meta{font-size:13px; color:var(--text2); margin:6px 0 4px;}
   .meta strong{color:var(--text);}
   table{border-collapse:collapse; font-size:13px;}
-  th{font-size:11px; font-weight:400; color:var(--text3); padding:2px; min-width:34px; text-align:center;}
+  th{font-size:11px; font-weight:400; color:var(--text3); padding:2px 6px; min-width:56px; text-align:center;}
   th.now{color:var(--info-tx); font-weight:600;}
   td{padding:3px; text-align:center;}
   .pname{text-align:left; padding:4px 8px 4px 0; white-space:nowrap; font-size:13px;}
   .pamt{color:var(--text3); font-size:12px;}
   .cnt{color:var(--text3);}
-  .chk{display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:6px; cursor:pointer; border:0.5px solid var(--border2); user-select:none; font-size:14px;}
+  .chk{display:inline-flex; align-items:center; justify-content:center; min-width:56px; height:26px; padding:0 6px; border-radius:6px; cursor:pointer; border:0.5px solid var(--border2); user-select:none; font-size:12px; white-space:nowrap;}
   .chk.on{background:var(--success-bg); color:var(--success-tx);}
   .chk.saving{opacity:0.4;}
   .scroll{overflow-x:auto; margin-top:4px;}
@@ -63,6 +63,7 @@
   .addsvc{background:var(--card); border:1px dashed var(--border2); border-radius:12px; padding:16px 20px; margin-bottom:12px;}
   .danger{color:#9b1c1c;}
   .perv{font-size:11px; color:var(--text3); display:block;}
+  .priceEdit{font-weight:600; color:var(--info-tx); text-decoration:underline dotted; cursor:pointer;}
   @media (prefers-color-scheme:dark){
     :root{--bg:#262624;--card:#1f1f1d;--border:rgba(255,255,255,0.14);--border2:rgba(255,255,255,0.24);--text:#f2f1ec;--text2:#a8a69e;--text3:#76746c;--success-bg:#085041;--success-tx:#9fe1cb;--accent-bg:#2c2c2a;--info-tx:#85b7eb;--warn-bg:#3a2c18;--warn-tx:#e0b070;}
     .status.err{background:#4a1515;color:#f8b4b4;}
@@ -208,12 +209,18 @@ function render(){
     if(type==="fix"){
       const total=Number(monthRows[0]?.cena_celkom)||0;
       const perShare=total/totalShares;
+      const priceEl = editMode
+        ? `<a href="#" class="priceEdit" data-priceedit="${svc}|fix">${eur(total)}</a>`
+        : `<strong>${eur(total)}</strong>`;
       metaLine = `<span class="tag fix">pevná cena</span>
-        <div class="meta">Celkom <strong>${eur(total)}</strong>/mes. · ${firstM.label}: ${totalShares} podielov = <strong>${eur(perShare)}</strong>/podiel <span class="perv">(cena na osobu sa mení podľa počtu ľudí v danom mesiaci)</span></div>`;
+        <div class="meta">Celkom ${priceEl}/mes. · ${firstM.label}: ${totalShares} podielov = <strong>${eur(perShare)}</strong>/podiel <span class="perv">(cena na osobu sa mení podľa počtu ľudí v danom mesiaci)</span></div>`;
     } else {
       const unit=Number(monthRows[0]?.cena_podiel)||0;
+      const priceEl = editMode
+        ? `<a href="#" class="priceEdit" data-priceedit="${svc}|lic">${eur(unit)}</a>`
+        : `<strong>${eur(unit)}</strong>`;
       metaLine = `<span class="tag lic">za licenciu</span>
-        <div class="meta"><strong>${eur(unit)}</strong>/licenciu · ${firstM.label}: ${totalShares} licencií = <strong>${eur(unit*totalShares)}</strong> spolu</div>`;
+        <div class="meta">${priceEl}/licenciu · ${firstM.label}: ${totalShares} licencií = <strong>${eur(unit*totalShares)}</strong> spolu</div>`;
     }
 
     const card=document.createElement("div"); card.className="card";
@@ -231,13 +238,12 @@ function render(){
         if(!row) return `<td></td>`;
         const on=row.zaplatene;
         const a=rowAmount(row);
-        return `<td><span class="chk ${on?'on':''}" data-id="${row.id}" title="${m.label}: ${eur(a)}">${on?'✓':''}</span></td>`;
+        return `<td><span class="chk ${on?'on':''}" data-id="${row.id}" title="${m.label}: ${eur(a)}">${on?eur(a):''}</span></td>`;
       }).join("");
       const paid=mk.filter(m=>{const r=svcRows.find(r=>r.platca===p && ymKey(r.mesiac)===m.key); return r&&r.zaplatene;}).length;
       const inRange=mk.filter(m=>svcRows.find(r=>r.platca===p && ymKey(r.mesiac)===m.key)).length;
-      const shTxt = sh>1 ? ` ${sh}×` : "";
       const pEdit = editMode ? `<button class="editbtn" data-renameper="${svc}|${p}">✎</button><button class="editbtn danger" data-delper="${svc}|${p}">✕</button>` : "";
-      return `<tr><td class="pname">${p}<span class="pamt">${shTxt} · ~${eur(amtFirst)}</span> <span class="cnt">(${paid}/${inRange})</span> ${pEdit}</td>${cells}</tr>`;
+      return `<tr><td class="pname">${p} ${pEdit}</td>${cells}</tr>`;
     }).join("");
     const header=`<tr><th></th>${mk.map(m=>`<th class="${m.isNow?'now':''}">${m.label}</th>`).join("")}</tr>`;
 
@@ -285,6 +291,7 @@ function bindEvents(){
   wrap.querySelectorAll("[data-renamesvc]").forEach(el=>el.addEventListener("click",()=>renameService(el.dataset.renamesvc)));
   wrap.querySelectorAll("[data-delsvc]").forEach(el=>el.addEventListener("click",()=>deleteService(el.dataset.delsvc)));
   wrap.querySelectorAll("[data-svcsettings]").forEach(el=>el.addEventListener("click",()=>serviceSettings(el.dataset.svcsettings)));
+  wrap.querySelectorAll("[data-priceedit]").forEach(el=>el.addEventListener("click",e=>{e.preventDefault();const[s,t]=el.dataset.priceedit.split("|");changePrice(s,t);}));
   wrap.querySelectorAll("[data-renameper]").forEach(el=>el.addEventListener("click",()=>{const[s,p]=el.dataset.renameper.split("|");renamePerson(s,p);}));
   wrap.querySelectorAll("[data-delper]").forEach(el=>el.addEventListener("click",()=>{const[s,p]=el.dataset.delper.split("|");deletePerson(s,p);}));
   wrap.querySelectorAll("[data-addper]").forEach(el=>el.addEventListener("click",()=>addPerson(el.dataset.addper)));
@@ -326,6 +333,26 @@ async function deleteService(svc){
   if(!confirm(`Zmazať celú službu ${svc}?`)) return;
   setStatus("Mažem…","ok");
   const {error}=await sb.from("platby").delete().eq("sluzba",svc);
+  if(error){ setStatus("Chyba: "+error.message,"err"); return; }
+  await reloadOnly();
+}
+async function changePrice(svc, type){
+  const svcRows=rows.filter(r=>r.sluzba===svc);
+  const cur = type==="fix" ? (Number(svcRows[0].cena_celkom)||0) : (Number(svcRows[0].cena_podiel)||0);
+  const label = type==="fix" ? "Nová celková mesačná cena služby v €:" : "Nová cena za 1 licenciu v €:";
+  const u=prompt(label, cur); if(u===null) return;
+  const price=parseFloat(u.replace(",","."))||0;
+  // od ktorého mesiaca
+  const mk=monthKeys();
+  const def = mk[0].y+"-"+String(mk[0].m+1).padStart(2,"0");
+  const from=prompt("Od ktorého mesiaca platí nová cena? (formát RRRR-MM, napr. 2026-09)\nStaršie mesiace ostanú s pôvodnou cenou.", def);
+  if(from===null) return;
+  const fromDate=from.trim()+"-01";
+  const ids=svcRows.filter(r=>r.mesiac>=fromDate).map(r=>r.id);
+  if(ids.length===0){ setStatus("Pre zvolený mesiac nie sú žiadne riadky.","err"); return; }
+  setStatus("Ukladám cenu…","ok");
+  const field = type==="fix" ? {cena_celkom:price} : {cena_podiel:price};
+  const {error}=await sb.from("platby").update(field).in("id",ids);
   if(error){ setStatus("Chyba: "+error.message,"err"); return; }
   await reloadOnly();
 }
